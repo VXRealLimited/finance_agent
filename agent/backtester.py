@@ -176,4 +176,8 @@ class Backtester:
             "completed_round_trips": len(round_trip_returns),
             "total_trades": len(trades),
             "trades": trades,
+            "equity_curve": [
+                {"datetime": e["datetime"].isoformat(), "equity": round(e["equity"], 2)}
+                for e in equity_curve
+            ],
         }

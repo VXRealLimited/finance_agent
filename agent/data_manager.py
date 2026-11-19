@@ -1,6 +1,6 @@
 import requests
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime
 from pymongo import MongoClient, UpdateOne
 
 INTERVAL_MS = {
@@ -14,11 +14,9 @@ INTERVAL_MS = {
 
 
 class MarketDataManager:
-    def __init__(
-        self, mongo_uri="mongodb://localhost:27017/", db_name="crypto_backtest"
-    ):
-        self.client = MongoClient(mongo_uri)
-        self.db = self.client[db_name]
+    def __init__(self):
+        self.client = MongoClient()
+        self.db = self.client["crypto_backtest"]
         self.collection = self.db["ohlcv"]
         # Ensure fast lookups and prevent duplicate candles across intervals
         self.collection.create_index(

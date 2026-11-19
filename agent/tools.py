@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import tool
 
 # Import the modular backtesting & data components
-from data_manager import MarketDataManager
-from indicators import IndicatorEngine
-from backtester import Backtester
+from agent.data_manager import MarketDataManager
+from agent.indicators import IndicatorEngine
+from agent.backtester import Backtester
 
 # In-memory store for the active crypto trading strategy configuration.
 STRATEGY_CONFIG: Dict = {
@@ -16,6 +16,7 @@ STRATEGY_CONFIG: Dict = {
     "timeframe": "4h",
     "buy_signals": [],
     "sell_signals": [],
+    "last_backtest": None,
 }
 
 # --- Helper Functions for Indicator Standardization & Parsing ---
@@ -287,7 +288,7 @@ def run_backtest(period: str = "180d", initial_capital: float = 10000.0) -> str:
         warmup_bars = IndicatorEngine.get_required_warmup(indicator_configs)
 
         # 3. Lazy-load from local MongoDB (automatically fetches missing candles from Binance)
-        data_mgr = MarketDataManager(mongo_uri="mongodb://localhost:27017/")
+        data_mgr = MarketDataManager()
         raw_df = data_mgr.get_ohlcv(
             symbol=symbol,
             interval=interval,
@@ -324,6 +325,20 @@ def run_backtest(period: str = "180d", initial_capital: float = 10000.0) -> str:
             )
             or "  - No trades executed during this period."
         )
+
+        STRATEGY_CONFIG["last_backtest"] = {
+            "pair": symbol,
+            "timeframe": interval,
+            "period": period,
+            "initial_capital": results["initial_capital"],
+            "final_equity": results["final_equity"],
+            "total_return_pct": results["total_return_pct"],
+            "max_drawdown_pct": results["max_drawdown_pct"],
+            "win_rate_pct": results.get("win_rate_pct", 0.0),
+            "total_trades": results["total_trades"],
+            "status": "Completed",
+            "equity_curve": results["equity_curve"],
+        }
 
         return (
             f"Backtest Results for {symbol} ({interval} | Last {period}):\n"

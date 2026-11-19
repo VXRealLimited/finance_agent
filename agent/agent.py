@@ -1,4 +1,6 @@
 import os
+import pandas as pd
+import gradio as gr
 from typing import Annotated, Any, Dict, List, Tuple
 from typing_extensions import TypedDict
 from pydantic import SecretStr
@@ -71,10 +73,11 @@ def reset_strategy_state() -> None:
     STRATEGY_CONFIG["timeframe"] = "4h"
     STRATEGY_CONFIG["buy_signals"].clear()
     STRATEGY_CONFIG["sell_signals"].clear()
+    STRATEGY_CONFIG["last_backtest"] = None
 
 
-def get_dashboard_data() -> Tuple[str, List[List[Any]]]:
-    """Return formatted markdown summary of active rules and portfolio/backtest rows."""
+def get_dashboard_data():
+    """Return markdown rules, table rows, chart container visibility, and LinePlot update."""
     pair = STRATEGY_CONFIG["pair"] or "Not set"
     timeframe = STRATEGY_CONFIG["timeframe"]
     buys = STRATEGY_CONFIG["buy_signals"]
@@ -104,23 +107,57 @@ def get_dashboard_data() -> Tuple[str, List[List[Any]]]:
         f"**Sell Signals:**\n{sell_md}"
     )
 
-    # Portfolio / Backtest summary table rows (populated once backtest engine is wired up)
+    bt = STRATEGY_CONFIG.get("last_backtest")
+    if not bt or not bt.get("equity_curve"):
+        portfolio_rows = [
+            ["Starting Capital", "$10,000.00 USDT"],
+            ["Current Equity", "$10,000.00 USDT"],
+            ["Total Return", "0.00%"],
+            ["Win Rate", "—"],
+            ["Total Trades", "0"],
+            ["Status", "Awaiting Backtest"],
+        ]
+        return strategy_md, portfolio_rows, gr.update(visible=False), None
+
+    sign = "+" if bt["total_return_pct"] > 0 else ""
     portfolio_rows = [
-        ["Starting Capital", "$10,000.00 USDT"],
-        ["Current Equity", "$10,000.00 USDT"],
-        ["Total Return", "0.00%"],
-        ["Win Rate", "—"],
-        ["Total Trades", "0"],
-        ["Status", "Awaiting Backtest"],
+        ["Starting Capital", f"${bt['initial_capital']:,.2f} USDT"],
+        ["Current Equity", f"${bt['final_equity']:,.2f} USDT"],
+        ["Total Return", f"{sign}{bt['total_return_pct']:.2f}%"],
+        ["Win Rate", f"{bt['win_rate_pct']:.1f}%"],
+        ["Total Trades", str(bt["total_trades"])],
+        ["Status", f"{bt['status']} ({bt['pair']} {bt['timeframe']})"],
     ]
 
-    return strategy_md, portfolio_rows
+    equity_df = pd.DataFrame(bt["equity_curve"])
+    equity_df["datetime"] = (
+        pd.to_datetime(equity_df["datetime"])
+        .dt.tz_localize(None)
+        .astype("datetime64[ns]")
+    )
+    equity_df["equity"] = equity_df["equity"].astype(float)
+
+    min_eq = equity_df["equity"].min()
+    max_eq = equity_df["equity"].max()
+    pad = max((max_eq - min_eq) * 0.05, 10.0)
+
+    equity_plot = gr.LinePlot(
+        value=equity_df,
+        x="datetime",
+        y="equity",
+        x_title="Date",
+        y_title="Equity (USDT)",
+        y_lim=[min_eq - pad, max_eq + pad],
+        height=240,
+    )
+
+    return strategy_md, portfolio_rows, gr.update(visible=True), equity_plot
 
 
 def run_agent_turn(
     user_text: str,
     agent_messages: List[BaseMessage],
-) -> Tuple[str, List[BaseMessage], str, List[List[Any]]]:
+) -> Tuple[str, List[BaseMessage]]:
     """Execute one conversational turn through the LangGraph agent."""
     input_messages = list(agent_messages) + [HumanMessage(content=user_text)]
     result = AGENT_GRAPH.invoke({"messages": input_messages})
@@ -142,5 +179,4 @@ def run_agent_turn(
     else:
         reply_text = "Done."
 
-    strategy_md, portfolio_rows = get_dashboard_data()
-    return reply_text, updated_messages, strategy_md, portfolio_rows
+    return reply_text, updated_messages
